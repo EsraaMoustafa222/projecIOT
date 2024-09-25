@@ -4,18 +4,18 @@
 #include <ESP32Servo.h>
 #include <Wire.h>
 #include <WiFiClientSecure.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+// Initialize LCD (adjust the address if needed, 0x27 is a common address)
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// Wi-Fi credentials
-const char* ssid = "M1M2#";  // Replace with your WiFi SSID
-const char* password = "Mn123456Mn#";  // Replace with your WiFi password
+// WiFi credentials
+const char* ssid = "Menna'a Galaxy A52s 5G";  // Replace with your WiFi SSID
+const char* password = "mm@392002";  // Replace with your WiFi password
 WiFiClientSecure espClient;
-
 // MQTT broker settings
 const char* mqttServer = "3653c25602b04b5fa79a6836417632e7.s1.eu.hivemq.cloud";  // HiveMQ broker
 const int mqttPort = 8883;  // Default MQTT port
-const char* mqttUser = "esraa_123";  // MQTT username
-const char* mqttPassword = "Me_br123";  // MQTT password
-
 // HiveMQ Cloud Let's Encrypt CA certificate
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -51,22 +51,22 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )EOF";
 
+const char* mqttUser = "esraa_123";  // If using authentication
+const char* mqttPassword = "Me_br123";  // If using authentication
+
+
 PubSubClient client(espClient);
 
 // Topics for MQTT
 const char* flameTopic = "firefighter/flame";
 const char* smokeTopic = "firefighter/smoke";
 const char* stateTopic = "firefighter/state";
-const char* waterPumpTopic = "home/waterPump";
-const char* servoTopic = "home/servo";
-
+const char* controlTopic = "firefighter/control";  // Topic to receive control commands
 // Servo Initialization 
 Servo myservo;
 int pos = 0;
 boolean fire = false;
 
-// Pin definitions
-// Motor and sensor pin definitions
 #define IN1 17
 #define IN2 5
 #define IN3 18
@@ -75,9 +75,9 @@ boolean fire = false;
 #define flameM 39
 #define flameR 34
 #define buzzer 23
-#define relaypump 16
 #define smoke 35
 #define servoPin 32
+
 
 // Function declarations
 void _stop();
@@ -91,11 +91,27 @@ void setup_wifi();
 void reconnect();
 void publishStatus(const char* status);
 void callback(char* topic, byte* payload, unsigned int length);  // MQTT callback function declaration
-void connectToMQTT();
-void forward();
+void  connectToMQTT();
+void    forword();
+
 
 void setup() {
   Serial.begin(115200);
+  Wire.begin();           // Initialize I2C communication
+    Wire.setClock(100000);
+
+    // Initialize LCD
+    lcd.begin(16, 2);        // Initialize the LCD
+    lcd.backlight();        // Turn on the backlight
+    lcd.setCursor(0, 0);
+    lcd.print("Fire Fighter");
+    lcd.setCursor(0, 1);
+    lcd.print("Robot");
+
+    delay(2000);  // Show message for 2 seconds
+    
+
+
 
   // Wi-Fi setup
   WiFi.begin(ssid, password);
@@ -136,6 +152,11 @@ void setup() {
 }
 
 void loop() {
+     
+    lcd.setCursor(0, 0);
+    lcd.print("Reading Sensors");
+    int smokeval = analogRead(smoke);
+
   // Reconnect if disconnected from MQTT
   if (!client.connected()) {
     connectToMQTT();
@@ -143,7 +164,7 @@ void loop() {
   client.loop();  // Handle incoming/outgoing MQTT messages
 
   // Sensor readings
-  int smokeval = analogRead(smoke);
+
   int flameLVal = digitalRead(flameL);
   int flameMVal = digitalRead(flameM);
   int flameRVal = digitalRead(flameR);
@@ -160,10 +181,16 @@ void loop() {
 
   // Robot operation logic
   if (flameLVal == 1 && flameMVal == 1 && flameRVal == 1) {
+        
+ lcd.print("No Fire");
+delay(1000);
     _stop();
     client.publish(stateTopic, "Idle");
   } else if (flameMVal == 0) {
-    forward();
+    forword();
+    lcd.setCursor(0, 1);
+        lcd.print("Middle Sensor");
+
     delay(300);
     _stop();
     _buzzer();
@@ -171,6 +198,9 @@ void loop() {
     client.publish(stateTopic, "In action - Front");
   } else if (flameLVal == 0) {
     left();
+       lcd.setCursor(0, 1);
+        lcd.print("Left Sensor");
+
     delay(300);
     _stop();
     _buzzer();
@@ -178,6 +208,9 @@ void loop() {
     client.publish(stateTopic, "In action - Left");
   } else if (flameRVal == 0) {
     right();
+      lcd.setCursor(0, 1);
+      lcd.print("Right Sensor");
+
     delay(300);
     _stop();
     _buzzer();
@@ -195,15 +228,16 @@ void loop() {
 }
 
 // MQTT connect function
+// MQTT connect function
 void connectToMQTT() {
-  espClient.setCACert(root_ca);  // Set CA Certificate for SSL connection
-
+  // Set CA Certificate for SSL connection
+  espClient.setCACert(root_ca);
+  
   while (!client.connected()) {
     Serial.println("Connecting to MQTT...");
     if (client.connect("ESP32Firefighter", mqttUser, mqttPassword)) {
       Serial.println("Connected to MQTT");
-      client.subscribe(waterPumpTopic);  // Subscribe to water pump control
-      client.subscribe(servoTopic);       // Subscribe to servo control
+      client.subscribe(controlTopic);  // Subscribe to control topic
     } else {
       Serial.print("Failed to connect, state: ");
       Serial.println(client.state());
@@ -212,114 +246,106 @@ void connectToMQTT() {
   }
 }
 
-
 // MQTT callback function
 void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived on topic: ");
+  Serial.println(topic);
+
+  // Convert the payload into a string
   String message;
-  for (int i = 0; i < length; i++) {
+  for (unsigned int i = 0; i < length; i++) {
     message += (char)payload[i];
   }
-
-  Serial.print("Message received on topic: ");
-  Serial.println(topic);
   Serial.print("Message: ");
   Serial.println(message);
 
-  // Water Pump control
-  if (String(topic) == waterPumpTopic) {
-    if (message == "on") {
-      digitalWrite(relaypump, HIGH); // Turn the water pump ON
-      Serial.println("Water pump turned ON");
-    } else if (message == "off") {
-      digitalWrite(relaypump, LOW); // Turn the water pump OFF
-      Serial.println("Water pump turned OFF");
+  // Control actions based on the message content
+  if (String(topic) == controlTopic) {
+    if (message == "start") {
+      // Start the robot's operation
+      Serial.println("Starting robot operation");
+      // You can set a flag or call a function to start the robot
+    } else if (message == "stop") {
+      // Stop the robot's operation
+      Serial.println("Stopping robot operation");
+      _stop();
+    } else if (message == "buzzer") {
+      // Activate the buzzer
+      Serial.println("Activating buzzer");
+      _buzzer();
     }
-  }
-
-  // Servo control
-  if (String(topic) == servoTopic) {
-    int angle = message.toInt();
-    if (angle >= 0 && angle <= 180) {
-      myservo.write(angle); // Set the servo to the specified angle
-      Serial.print("Servo angle set to: ");
-      Serial.println(angle);
-    } else {
-      Serial.println("Invalid servo angle");
-    }
+    // Add more commands as needed
   }
 }
 
-
 // Existing functions (put_off_fire, _stop, movement functions, _buzzer) remain unchanged
+// ... [Include all your existing functions here] ...
+
 void put_off_fire() {
+   lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Extinguishing...");
+
   _stop();
   for (pos = 0; pos <= 180; pos += 1) {
     myservo.write(pos);
-    delay(25);
+    delay(10);
   }
   for (pos = 180; pos >= 0; pos -= 1) {
     myservo.write(pos);
-    delay(25);
+    delay(10);
   }
   myservo.write(90);
-      digitalWrite(relaypump, LOW);  // Turn OFF the water pump 
-    Serial.println("Relay pump OFF (LOW). Water pump deactivated.");
+      lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Extinguished!");
+    delay(2000);
+    lcd.clear();
 
     fire = false;
-}
 
-void forward() {
-    Serial.println("Moving forward.");
-    digitalWrite(IN1, HIGH);
-    digitalWrite(IN2, LOW);
-    digitalWrite(IN3, HIGH);
-    digitalWrite(IN4, LOW);
-    delay(200);  // Shorter delay for a smaller forward turn (try adjusting between 100-200 ms)
-    _stop();     // Stop after a small movement
-}
-
-void backward() {
-    Serial.println("Moving backward.");
-    digitalWrite(IN1, LOW);
-    digitalWrite(IN2, HIGH);
-    digitalWrite(IN3, LOW);
-    digitalWrite(IN4, HIGH);
-}
-
-void right() {
-    Serial.println("Turning right.");
-    digitalWrite(IN1, LOW);
-    digitalWrite(IN2, LOW);
-    digitalWrite(IN3, HIGH);
-    digitalWrite(IN4, LOW);
-    delay(200);  // Shorter delay for a smaller right turn (try adjusting between 100-200 ms)
-    _stop();     // Stop after a small movement
-}
-
-void left() {
-    Serial.println("Turning left.");
-    digitalWrite(IN1, HIGH);
-    digitalWrite(IN2, LOW);
-    digitalWrite(IN3, LOW);
-    digitalWrite(IN4, LOW);
-        delay(200);  // Shorter delay for a smaller left turn (try adjusting between 100-200 ms)
-    _stop();     // Stop after a small movement
 }
 
 void _stop() {
-    Serial.println("Stopping motors.");
-    digitalWrite(IN1, LOW);
-    digitalWrite(IN2, LOW);
-    digitalWrite(IN3, LOW);
-    digitalWrite(IN4, LOW);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+void forword() {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void backword() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+void right() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void left() {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
 }
 
 void _buzzer() {
-    Serial.println("Buzzer activated.");
-    for (int i = 0; i < 3; i++) {  // Beep 3 times
-        digitalWrite(buzzer, HIGH);
-        delay(500);
-        digitalWrite(buzzer, LOW);
-        delay(500);
-    }
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(buzzer, HIGH);
+    delay(500);
+    digitalWrite(buzzer, LOW);
+    delay(500);
+  }
 }

@@ -1,9 +1,10 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 
 class ChatService {
-  final String apiUrl = 'https://api.groq.com/openai/v1/chat/completions'; // Replace with the Groq API URL
-  final String apiKey = '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'; // Replace with your actual Groq API key
+  final String apiUrl = 'api_ui'; // Replace with the Groq API URL
+  final String apiKey = ''; // Replace with your actual Groq API key
 
   Future<String> sendMessage(String userMessage) async {
     final headers = {
