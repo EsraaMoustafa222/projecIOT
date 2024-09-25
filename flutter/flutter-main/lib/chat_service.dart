@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ChatService {
-  final String apiUrl = 'api_ui'; // Replace with the Groq API URL
+  final String apiUrl = 'api_UI'; // Replace with the Groq API URL
   final String apiKey = ''; // Replace with your actual Groq API key
 
   Future<String> sendMessage(String userMessage) async {
